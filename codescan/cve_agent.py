@@ -1,6 +1,7 @@
-"""Agentic CVE analyst with the lab's operational-safety controls applied:
-scoped short-lived token, deny-by-default per-call authorization, audit log of
-every action, and a kill switch (revocation) re-checked each turn.
+"""Agentic CVE analyst with the full operational-safety + egress stack:
+scoped token, per-call authorization, audit log, kill switch, and egress body
+inspection on every tool call (destination allowlist is enforced separately at
+the network layer).
 """
 import json
 import os
@@ -9,12 +10,12 @@ import secrets
 import urllib.request
 from pathlib import Path
 import anthropic
+from codescan.egress_filter import egress_check
 
 MODEL = "claude-haiku-4-5-20251001"
 LOG_FILE = Path(os.environ.get("AGENT_LOG", "agent_audit.jsonl"))
 REVOKED_FILE = Path("revoked_tokens.txt")
 
-# role sets the ceiling of tools; task sets the floor; the grant is the intersection
 ROLE_TOOLS = {"scanner": {"check_cve"}}
 TASK_TOOLS = {"dependency-audit": {"check_cve"}, "read-only": set()}
 
@@ -82,7 +83,6 @@ TOOL_IMPLS = {"check_cve": check_cve}
 
 
 def authorize(name, token):
-    """Deny-by-default: tool must be registered AND within the token's scope."""
     if name not in TOOL_IMPLS:
         return False, f"unknown tool {name!r}"
     if name not in token["scope"]:
@@ -99,7 +99,7 @@ def analyze_dependencies(requirements_text, role="scanner", task="dependency-aud
     messages = [{"role": "user", "content": f"Dependencies:\n{requirements_text}"}]
 
     for _ in range(max_turns):
-        ok, why = token_valid(token)                      # kill switch + expiry
+        ok, why = token_valid(token)
         if not ok:
             log("aborted", {"reason": why}, token)
             return f"[aborted: {why}]"
@@ -115,11 +115,17 @@ def analyze_dependencies(requirements_text, role="scanner", task="dependency-aud
                 if block.type == "tool_use":
                     allowed, why = authorize(block.name, token)
                     log("authorize", {"tool": block.name, "allowed": allowed, "why": why}, token)
-                    if allowed:
-                        out = TOOL_IMPLS[block.name](**block.input)
-                    else:
+                    if not allowed:
                         print(f"  [DENIED] {block.name}: {why}")
                         out = {"error": why}
+                    else:
+                        eok, ereason = egress_check(json.dumps(block.input))   # egress body check
+                        log("egress_check", {"allowed": eok, "why": ereason}, token)
+                        if not eok:
+                            print(f"  [EGRESS-BODY BLOCKED] {ereason}")
+                            out = {"error": f"egress blocked: {ereason}"}
+                        else:
+                            out = TOOL_IMPLS[block.name](**block.input)
                     log("tool_call", {"tool": block.name, "input": block.input}, token)
                     results.append({"type": "tool_result", "tool_use_id": block.id,
                                     "content": json.dumps(out)})
