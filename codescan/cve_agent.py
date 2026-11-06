@@ -3,6 +3,7 @@ scoped short-lived token, deny-by-default per-call authorization, audit log of
 every action, and a kill switch (revocation) re-checked each turn.
 """
 import json
+import os
 import time
 import secrets
 import urllib.request
@@ -10,7 +11,7 @@ from pathlib import Path
 import anthropic
 
 MODEL = "claude-haiku-4-5-20251001"
-LOG_FILE = Path("agent_audit.jsonl")
+LOG_FILE = Path(os.environ.get("AGENT_LOG", "agent_audit.jsonl"))
 REVOKED_FILE = Path("revoked_tokens.txt")
 
 # role sets the ceiling of tools; task sets the floor; the grant is the intersection

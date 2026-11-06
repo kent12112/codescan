@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: cve-agent
+  namespace: scanner
+spec:
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+  - name: agent
+    image: docker.io/library/codescan-agent:latest
+    imagePullPolicy: Never
+    env:
+    - name: ANTHROPIC_API_KEY
+      valueFrom:
+        secretKeyRef:
+          name: anthropic
+          key: api-key
+    - name: PYTHONDONTWRITEBYTECODE
+      value: "1"
+    - name: AGENT_LOG
+      value: /tmp/agent_audit.jsonl
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop: ["ALL"]
+    volumeMounts:
+    - name: tmp
+      mountPath: /tmp
+  volumes:
+  - name: tmp
+    emptyDir: {}

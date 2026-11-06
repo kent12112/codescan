@@ -1,0 +1,22 @@
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicyNamespaced
+metadata:
+  name: kill-shell
+  namespace: scanner
+spec:
+  kprobes:
+  - call: "security_bprm_creds_from_file"
+    syscall: false
+    args:
+    - index: 1
+      type: "file"
+    selectors:
+    - matchArgs:
+      - index: 1
+        operator: "Postfix"
+        values:
+        - "bin/sh"
+        - "bin/bash"
+        - "bin/dash"
+      matchActions:
+      - action: Sigkill
