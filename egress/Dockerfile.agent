@@ -1,0 +1,8 @@
+FROM python:3.12-slim
+RUN pip install --no-cache-dir anthropic && useradd --create-home --uid 1000 agent
+COPY codescan /home/agent/codescan
+COPY egress/agent_run.py /home/agent/agent_run.py
+WORKDIR /home/agent
+USER agent
+ENV PYTHONPATH=/home/agent
+ENTRYPOINT ["python", "agent_run.py"]

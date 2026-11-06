@@ -1,0 +1,6 @@
+FROM python:3.12-slim
+RUN useradd --create-home --uid 1000 proxyuser
+COPY egress/proxy.py /proxy.py
+USER proxyuser
+EXPOSE 8080
+ENTRYPOINT ["python", "/proxy.py"]
