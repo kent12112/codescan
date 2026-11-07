@@ -9,11 +9,15 @@ SEV = {"ERROR": "HIGH", "WARNING": "MEDIUM", "INFO": "LOW"}
 
 def run_semgrep(root, config="p/default"):
     """Run Semgrep on `root`; return normalized findings. Warns (not silent) on failure."""
-    proc = subprocess.run(
-        ["semgrep", "scan", "--config", config, "--json", "--quiet",
-         "--metrics=off", str(root)],
-        capture_output=True, text=True,
-    )
+    try:
+        proc = subprocess.run(
+            ["semgrep", "scan", "--config", config, "--json", "--quiet",
+             "--metrics=off", str(root)],
+            capture_output=True, text=True, timeout=300,
+        )
+    except subprocess.TimeoutExpired:
+        print("[warning] semgrep timed out", file=sys.stderr)
+        return []
     try:
         data = json.loads(proc.stdout)
     except json.JSONDecodeError:

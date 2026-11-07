@@ -18,15 +18,6 @@ TAG_KEYWORDS = {
 }
 
 
-def _in_tmp(path, fn):
-    d = tempfile.mkdtemp()
-    try:
-        shutil.copy(path, Path(d) / path.name)
-        return fn(Path(d))
-    finally:
-        shutil.rmtree(d, ignore_errors=True)
-
-
 def _tags(findings):
     out = set()
     for f in findings:
@@ -37,20 +28,31 @@ def _tags(findings):
     return out
 
 
-def analyst_tags(path):
-    return _tags(_in_tmp(path, lambda d: analyze_code(str(d))))
+def _analyst_one(path):
+    d = tempfile.mkdtemp()
+    try:
+        shutil.copy(path, Path(d) / path.name)
+        return _tags(analyze_code(str(d)))
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
 
 
-def semgrep_tags(path):
-    return _tags(_in_tmp(path, run_semgrep))
+def semgrep_by_file():
+    by_file = defaultdict(list)
+    for f in run_semgrep(SAMPLES):          # ONE pass over all samples
+        by_file[f.get("file")].append(f)
+    return {fn: _tags(by_file.get(fn, [])) for fn in LABELS}
 
 
-def score(detect):
+def analyst_by_file():
+    return {fn: _analyst_one(SAMPLES / fn) for fn in LABELS}
+
+
+def score(tags_by_file):
     classes = sorted(TAG_KEYWORDS)
     tp = defaultdict(int); fp = defaultdict(int); fn = defaultdict(int); diffs = []
     for fname, expected in LABELS.items():
-        expected = set(expected)
-        detected = detect(SAMPLES / fname)
+        expected = set(expected); detected = tags_by_file.get(fname, set())
         for c in classes:
             if c in expected and c in detected: tp[c] += 1
             elif c in expected: fn[c] += 1
@@ -64,8 +66,8 @@ def score(detect):
     return P, R, F1, TP, FP, FN, diffs
 
 
-def show(name, detect):
-    P, R, F1, TP, FP, FN, diffs = score(detect)
+def show(name, tags_by_file):
+    P, R, F1, TP, FP, FN, diffs = score(tags_by_file)
     print(f"\n### {name}")
     print(f"    precision={P:.2f}  recall={R:.2f}  f1={F1:.2f}   (TP={TP} FP={FP} FN={FN})")
     for fname, exp, det in diffs:
@@ -79,7 +81,7 @@ def consistency(runs=3):
     hits = defaultdict(int)
     for _ in range(runs):
         for fname, expected in vuln.items():
-            det = analyst_tags(SAMPLES / fname)
+            det = _analyst_one(SAMPLES / fname)
             for tag in expected:
                 hits[(fname, tag)] += (tag in det)
     for fname, expected in vuln.items():
@@ -92,8 +94,10 @@ def main():
     if len(sys.argv) > 1 and sys.argv[1] == "consistency":
         consistency(3)
     else:
-        show("Semgrep (rules only)", semgrep_tags)
-        show("LLM analyst", analyst_tags)
+        print("running semgrep (one pass)...")
+        show("Semgrep (rules only)", semgrep_by_file())
+        print("\nrunning analyst (per file, ~8 calls)...")
+        show("LLM analyst", analyst_by_file())
 
 
 if __name__ == "__main__":
