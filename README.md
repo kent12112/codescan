@@ -49,32 +49,34 @@ The governing principle of this project:
 
 ### Detection pipeline (runs on any repo — only reads code)
 
-untrusted repo (URL or path)
-│ cloned/copied into a throwaway sandbox (never executed)
-▼
-┌─────────────── detection ───────────────┐
-│ Semgrep (rules) injection scan │
-│ LLM analyst (reasoning, any language) │
-└──────────────────────────────────────────┘
-│ normalized findings from every detector
-▼
-synthesis agent (correlate · de-dup · confidence)
-│ + deterministic backstop: no HIGH finding may be dropped
-▼
-unified, ranked report
-
+```mermaid
+flowchart TD
+    A["Untrusted repo<br/>(URL or path)"] -->|"cloned into sandbox — never executed"| B["Throwaway sandbox"]
+    B --> C["Semgrep<br/>(multi-language rules)"]
+    B --> D["Injection scan<br/>(pre-model)"]
+    B --> E["LLM analyst<br/>(reasoning — any language)"]
+    C --> F["Synthesis agent<br/>correlate · de-dup · confidence"]
+    D --> F
+    E --> F
+    F -->|"backstop: no HIGH finding dropped"| G["Unified ranked report"]
+```
 
 ### Containment (for the tool-using agent)
 
-k3s node
-├─ Linux kernel ── eBPF (Tetragon): kills a shell-spawn at the syscall
-├─ k3s API server ── PodSecurity «restricted»: rejects an unhardened pod
-└─ namespace: scanner
-├─ agent pod non-root · read-only FS · caps dropped · seccomp
-│ egress restricted by NetworkPolicy to the proxy only
-│ per tool call: scoped token → authorize → egress body-check → audit
-└─ proxy pod default-deny allowlist + TLS-terminating body WAF
-
+```mermaid
+flowchart TB
+    subgraph NODE["k3s node"]
+        API["k3s API server — PodSecurity «restricted»<br/>rejects unhardened pods at admission"]
+        KERNEL["Linux kernel + eBPF (Tetragon)<br/>kills a shell-spawn at the syscall"]
+        subgraph NS["namespace: scanner"]
+            AGENT["Agent pod<br/>non-root · read-only FS · caps dropped · seccomp<br/>per tool call: token → authorize → egress-check → audit"]
+            PROXY["Proxy pod<br/>default-deny allowlist + body-inspecting WAF"]
+        end
+    end
+    AGENT -->|"only egress path (NetworkPolicy)"| PROXY
+    PROXY -->|"allowlisted"| NET["LLM API · CVE database"]
+    AGENT -.->|"blocked — no route"| EVIL["attacker.com"]
+```
 
 The agent's **only** network path is the proxy (enforced by NetworkPolicy, verified).
 Allowed destinations: the LLM API and the CVE database. Everything else is refused.
