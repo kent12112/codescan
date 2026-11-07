@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: netpol-test
+  namespace: scanner
+  labels: { app: cve-agent }      # same label -> the agent-egress policy applies
+spec:
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    seccompProfile: { type: RuntimeDefault }
+  containers:
+  - name: t
+    image: docker.io/library/codescan-agent:latest
+    imagePullPolicy: Never
+    command: ["python","-c","import urllib.request; urllib.request.urlopen('https://api.osv.dev', timeout=6); print('REACHED DIRECTLY')"]
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities: { drop: ["ALL"] }
+    volumeMounts: [{ name: tmp, mountPath: /tmp }]
+  volumes:
+  - name: tmp
+    emptyDir: {}

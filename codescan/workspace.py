@@ -4,6 +4,11 @@ import tempfile
 from pathlib import Path
 from contextlib import contextmanager
 
+# code file types the scanner reads — the LLM analyst is language-agnostic
+CODE_EXTS = {".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".java", ".rb", ".php",
+             ".c", ".cc", ".cpp", ".h", ".hpp", ".cs", ".rs", ".kt", ".swift", ".scala"}
+SKIP = {".git", ".venv", "venv", "__pycache__", "node_modules", "dist", "build", ".next", "vendor"}
+
 
 @contextmanager
 def throwaway_copy(source: str):
@@ -18,9 +23,8 @@ def throwaway_copy(source: str):
         shutil.rmtree(work, ignore_errors=True)
 
 
-def source_files(root: Path, suffix=".py"):
-    """All source files under root (skipping virtualenvs, .git, caches)."""
-    skip = {".git", ".venv", "__pycache__", "node_modules"}
-    for p in sorted(root.rglob(f"*{suffix}")):
-        if not any(part in skip for part in p.parts):
+def source_files(root: Path, exts=CODE_EXTS):
+    """All source files under root across supported languages (skipping junk dirs)."""
+    for p in sorted(root.rglob("*")):
+        if p.is_file() and p.suffix.lower() in exts and not any(part in SKIP for part in p.parts):
             yield p

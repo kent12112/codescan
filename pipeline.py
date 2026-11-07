@@ -1,38 +1,55 @@
-"""codescan — unified analysis pipeline.
+"""codescan — scan any repo (URL or local path) and print a unified report.
 
-Runs the deterministic detectors (Bandit + injection) and the LLM analyst over a
-repo, then the synthesis agent (with its authority backstop) merges everything
-into one ranked, de-duplicated report. If a DAST report (dast/zap/report.json)
-exists, those findings are folded in too.
+Static pipeline (any repo — only reads code):
+  Semgrep (multi-language rules) + injection scan + LLM analyst
+  -> synthesis + authority backstop.
 """
-import sys
-from pathlib import Path
+import sys, subprocess, tempfile, shutil
+from contextlib import contextmanager
 from codescan.workspace import throwaway_copy
-from codescan.findings import run_bandit
+from codescan.semgrep_scan import run_semgrep
 from codescan.injection import find_injections
 from codescan.analyst import analyze_code
 from codescan.synthesize import synthesize
-from codescan.zap import load_zap_findings
 
 
-def scan(source):
-    with throwaway_copy(source) as work:
-        findings = run_bandit(work) + find_injections(work)
-    findings += analyze_code(source)
-    zap_report = Path("dast/zap/report.json")
-    if zap_report.exists():
-        findings += load_zap_findings(str(zap_report))
+@contextmanager
+def fetch(source):
+    is_url = source.startswith(("http://", "https://", "git@")) or source.endswith(".git")
+    if not is_url:
+        yield source
+        return
+    d = tempfile.mkdtemp(prefix="repo-")
+    try:
+        print(f"cloning {source} ...")
+        subprocess.run(["git", "clone", "--depth", "1", source, d],
+                       check=True, capture_output=True, text=True)
+        yield d
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def scan(path):
+    with throwaway_copy(path) as work:
+        findings = run_semgrep(work) + find_injections(work)
+    findings += analyze_code(path)
     return synthesize(findings)
 
 
 def main():
-    source = sys.argv[1] if len(sys.argv) > 1 else "dast/target"
-    print(f"scanning {source} ...\n")
-    for m in scan(source):
-        srcs = ", ".join(m.get("sources", []))
-        flag = "  [recovered by authority]" if m.get("recovered_by_authority") else ""
-        print(f"[{m['severity']}] {m['title']}  ({m.get('confidence')}; via {srcs}){flag}")
-        print(f"    {m.get('summary', '')}")
+    if len(sys.argv) < 2:
+        print("usage: python pipeline.py <repo-url-or-path>")
+        return
+    with fetch(sys.argv[1]) as path:
+        print(f"scanning {path} ...\n")
+        results = scan(path)
+        if not results:
+            print("no findings — clean, or no supported source files.")
+        for m in results:
+            srcs = ", ".join(m.get("sources", []))
+            flag = "  [recovered by authority]" if m.get("recovered_by_authority") else ""
+            print(f"[{m['severity']}] {m['title']}  ({m.get('confidence')}; via {srcs}){flag}")
+            print(f"    {m.get('summary', '')}")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,10 @@
+{
+  "cmdi.py": ["command-injection"],
+  "sqli.py": ["sql-injection"],
+  "code_eval.py": ["code-injection"],
+  "deser.py": ["deserialization"],
+  "authz.py": ["broken-access-control"],
+  "idor.py": ["idor"],
+  "safe_subprocess.py": [],
+  "safe_query.py": []
+}
