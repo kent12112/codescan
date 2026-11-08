@@ -3,6 +3,8 @@
 Static pipeline (any repo — only reads code):
   Semgrep (multi-language rules) + injection scan + LLM analyst
   -> synthesis + authority backstop.
+Dependency audit: if a requirements.txt is present AND the contained cve-agent
+pod is reachable, its deps are sent over HTTP to the agent and folded in.
 """
 import sys, subprocess, tempfile, shutil
 from contextlib import contextmanager
@@ -10,6 +12,7 @@ from codescan.workspace import throwaway_copy
 from codescan.semgrep_scan import run_semgrep
 from codescan.injection import find_injections
 from codescan.analyst import analyze_code
+from codescan.cve_client import cve_findings_via_agent
 from codescan.synthesize import synthesize
 
 
@@ -33,6 +36,7 @@ def scan(path):
     with throwaway_copy(path) as work:
         findings = run_semgrep(work) + find_injections(work)
     findings += analyze_code(path)
+    findings += cve_findings_via_agent(path)   # contained agent, called over the network
     return synthesize(findings)
 
 
