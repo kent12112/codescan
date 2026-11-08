@@ -1,15 +1,17 @@
-"""codescan — scan any repo (URL or local path) and print a unified report.
+"""codescan — scan any repo and print a unified report.
 
-Deterministic layer (local, sandboxed): Semgrep + injection scan (run once).
-Agentic analyst (contained pod, over HTTP): reasons over the code AND looks up
-dependency CVEs with a tool. Synthesis + authority backstop merge everything.
+Static (local, sandboxed): Semgrep + injection scan.
+Agentic analyst (contained pod, over HTTP): code reasoning + dependency CVEs.
+Dynamic (optional): if DAST_REPORT points to a ZAP JSON report, its findings
+fold into the same synthesis. Everything merged by synthesis + authority backstop.
 """
-import sys, subprocess, tempfile, shutil
+import os, sys, subprocess, tempfile, shutil
 from contextlib import contextmanager
 from codescan.workspace import throwaway_copy
 from codescan.semgrep_scan import run_semgrep
 from codescan.injection import find_injections
 from codescan.cve_client import analyze_via_agent
+from codescan.dast_client import dast_findings
 from codescan.synthesize import synthesize
 
 
@@ -32,9 +34,12 @@ def fetch(source):
 def scan(path):
     with throwaway_copy(path) as work:
         semgrep_findings = run_semgrep(work)
-        injection_findings = find_injections(work)        # run ONCE
+        injection_findings = find_injections(work)
     findings = semgrep_findings + injection_findings
-    findings += analyze_via_agent(path, injection_flags=injection_findings)  # reuse
+    findings += analyze_via_agent(path, injection_flags=injection_findings)
+    dast_report = os.environ.get("DAST_REPORT")
+    if dast_report:
+        findings += dast_findings(dast_report)      # fold in dynamic findings
     return synthesize(findings)
 
 

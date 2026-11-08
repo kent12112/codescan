@@ -8,7 +8,7 @@ GET  /healthz -> {"ok": true}
 import json
 import os
 import re
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from codescan.cve_agent import analyze, analyze_dependencies
 
@@ -84,4 +84,4 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "9000"))
     print(f"cve-agent server listening on :{port}", flush=True)
-    HTTPServer(("0.0.0.0", port), Handler).serve_forever()
+    ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()

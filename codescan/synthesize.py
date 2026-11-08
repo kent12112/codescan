@@ -68,7 +68,21 @@ def synthesize(findings, client=None):
         messages=[{"role": "user", "content": f"Findings:\n{json.dumps(indexed, indent=2)}"}],
     )
     merged = _extract_json(msg.content[0].text)
+    merged = _normalize_confidence(merged)
     recovered = _recover_dropped(findings, merged)
     if recovered:
         print(f"  [AUTHORITY] recovered {len(recovered)} HIGH finding(s) the synthesis dropped/downgraded")
-    return merged + recovered
+    return sorted(merged + recovered, key=lambda m: SEV.get(m.get('severity'), 0), reverse=True)
+
+
+def _normalize_confidence(merged):
+    """Dedupe sources to DISTINCT tools; 'confirmed' means 2+ different methods
+    agree (two Semgrep rules are one method, not two)."""
+    for m in merged:
+        seen = []
+        for src in m.get("sources", []):
+            if src not in seen:
+                seen.append(src)
+        m["sources"] = seen
+        m["confidence"] = "confirmed" if len(seen) >= 2 else "single-source"
+    return merged

@@ -1,0 +1,18 @@
+apiVersion: batch/v1
+kind: Job
+metadata: { name: dast, namespace: dast }
+spec:
+  backoffLimit: 0
+  template:
+    metadata: { labels: { app: dast-zap } }
+    spec:
+      restartPolicy: Never
+      securityContext: { fsGroup: 1000 }
+      containers:
+      - name: zap
+        image: ghcr.io/zaproxy/zaproxy:stable
+        imagePullPolicy: Never
+        command: ["bash", "-c"]
+        args: ["zap-baseline.py -t http://dast-target.scanner.svc.cluster.local:8000 -I -J report.json || true; echo ===REPORT_START===; cat /zap/wrk/report.json 2>/dev/null; echo; echo ===REPORT_END===; sleep 90"]
+        volumeMounts: [{ name: wrk, mountPath: /zap/wrk }]
+      volumes: [{ name: wrk, emptyDir: {} }]
