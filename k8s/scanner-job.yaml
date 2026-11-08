@@ -1,0 +1,41 @@
+# Reference template for the in-cluster scanner Job.
+# scan-job.sh renders this with a repo URL at launch time.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: codescan
+  namespace: scanner
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels: { app: codescan-scanner }
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+      - name: scanner
+        image: docker.io/library/codescan-scanner:latest
+        imagePullPolicy: Never
+        args: ["REPO_URL_HERE"]
+        env:
+        - name: CVE_AGENT_URL
+          value: "http://cve-agent:9000/analyze"
+        - name: ANTHROPIC_API_KEY
+          valueFrom: { secretKeyRef: { name: anthropic, key: api-key } }
+        - name: HOME
+          value: /tmp
+        - name: PYTHONDONTWRITEBYTECODE
+          value: "1"
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: { drop: ["ALL"] }
+        volumeMounts: [{ name: tmp, mountPath: /tmp }]
+      volumes:
+      - name: tmp
+        emptyDir: {}

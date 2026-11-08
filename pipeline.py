@@ -1,6 +1,6 @@
 """codescan — scan any repo (URL or local path) and print a unified report.
 
-Deterministic layer (local, sandboxed): Semgrep + injection scan.
+Deterministic layer (local, sandboxed): Semgrep + injection scan (run once).
 Agentic analyst (contained pod, over HTTP): reasons over the code AND looks up
 dependency CVEs with a tool. Synthesis + authority backstop merge everything.
 """
@@ -31,8 +31,10 @@ def fetch(source):
 
 def scan(path):
     with throwaway_copy(path) as work:
-        findings = run_semgrep(work) + find_injections(work)   # deterministic, local
-    findings += analyze_via_agent(path)                        # contained agentic analyst
+        semgrep_findings = run_semgrep(work)
+        injection_findings = find_injections(work)        # run ONCE
+    findings = semgrep_findings + injection_findings
+    findings += analyze_via_agent(path, injection_flags=injection_findings)  # reuse
     return synthesize(findings)
 
 

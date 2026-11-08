@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dast-target
+  namespace: scanner
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: dast-target } }
+  template:
+    metadata:
+      labels: { app: dast-target }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+      - name: target
+        image: docker.io/library/dast-target:latest
+        imagePullPolicy: Never
+        ports: [{ containerPort: 8000 }]
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: { drop: ["ALL"] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dast-target
+  namespace: scanner
+spec:
+  selector: { app: dast-target }
+  ports: [{ port: 8000, targetPort: 8000 }]
