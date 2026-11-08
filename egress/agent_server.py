@@ -1,27 +1,25 @@
-"""HTTP wrapper around the contained CVE agent.
+"""HTTP wrapper around the CONTAINED agentic analyst.
 
-POST /audit  {"requirements": "<pip freeze text>"}  -> {"findings": [...], "raw": "...", "note": null}
+POST /analyze {"code":..., "requirements":..., "injection_warning":...}
+     -> {"findings":[...], "raw":..., "note":...}   (code reasoning + CVE lookup)
+POST /audit   {"requirements":...}  -> dependency-only audit (back-compat)
 GET  /healthz -> {"ok": true}
-
-analyze_dependencies() runs IN THIS POD, so all containment (NetworkPolicy,
-egress proxy, seccomp, Tetragon) still applies to its work.
 """
 import json
 import os
 import re
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-from codescan.cve_agent import analyze_dependencies
+from codescan.cve_agent import analyze, analyze_dependencies
 
 
 def _extract_array(text):
-    """The model sometimes wraps its JSON array in prose or ```json fences.
-    Pull the array out so a verbose answer still parses."""
     if not isinstance(text, str):
         return None
     fenced = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
     candidate = fenced.group(1) if fenced else text
-    for chunk in (candidate, re.search(r"\[.*\]", candidate, re.DOTALL) and re.search(r"\[.*\]", candidate, re.DOTALL).group(0)):
+    m = re.search(r"\[.*\]", candidate, re.DOTALL)
+    for chunk in (candidate, m.group(0) if m else None):
         if not chunk:
             continue
         try:
@@ -35,9 +33,7 @@ def _extract_array(text):
 
 def _parse(result):
     arr = _extract_array(result)
-    if arr is not None:
-        return arr, None
-    return [], "could not extract a JSON array from the agent output"
+    return (arr, None) if arr is not None else ([], "could not extract a JSON array from the agent output")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -50,25 +46,32 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
         except (BrokenPipeError, ConnectionResetError):
-            pass  # client (often the readiness probe) hung up early
+            pass
 
     def do_GET(self):
         self._send(200, {"ok": True}) if self.path == "/healthz" else self._send(404, {"error": "not found"})
 
-    def do_POST(self):
-        if self.path != "/audit":
-            self._send(404, {"error": "not found"})
-            return
+    def _read_json(self):
         length = int(self.headers.get("Content-Length", 0))
-        raw = self.rfile.read(length) if length else b""
+        return json.loads(self.rfile.read(length) if length else b"{}")
+
+    def do_POST(self):
         try:
-            requirements = json.loads(raw)["requirements"]
-        except (json.JSONDecodeError, KeyError, TypeError):
-            self._send(400, {"error": "expected JSON body with a 'requirements' string"})
+            data = self._read_json()
+        except (json.JSONDecodeError, TypeError):
+            self._send(400, {"error": "invalid JSON body"})
             return
         try:
-            result = analyze_dependencies(requirements)
-        except Exception as exc:  # never die on one bad request
+            if self.path == "/analyze":
+                result = analyze(data.get("code", ""),
+                                 data.get("requirements", ""),
+                                 data.get("injection_warning", ""))
+            elif self.path == "/audit":
+                result = analyze_dependencies(data.get("requirements", ""))
+            else:
+                self._send(404, {"error": "not found"})
+                return
+        except Exception as exc:
             self._send(500, {"error": f"agent raised: {exc!r}"})
             return
         findings, note = _parse(result)
