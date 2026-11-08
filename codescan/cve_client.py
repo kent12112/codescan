@@ -82,7 +82,7 @@ def analyze_via_agent(repo_path, url=AGENT_URL, timeout=240):
         sev = v.get("severity", "MEDIUM")
         is_dep = v.get("kind") == "dependency"
         findings.append({
-            "tool": "cve-agent" if is_dep else "llm-analyst",
+            "tool": "llm-agent",
             "rule": "CVE" if is_dep else "LLM",
             "title": (v.get("title", "unspecified") or "unspecified")[:80],
             "severity": sev if sev in _SEV else "MEDIUM",
