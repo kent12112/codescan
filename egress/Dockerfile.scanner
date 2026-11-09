@@ -1,11 +1,19 @@
 FROM python:3.12-slim
 RUN apt-get update && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
-RUN pip install --no-cache-dir anthropic semgrep
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+# Freeze the registry rule snapshot into the image, outside hostile repositories.
+RUN mkdir -p /opt/rules && python -c "import urllib.request; urllib.request.urlretrieve('https://semgrep.dev/c/p/default', '/opt/rules/default.yaml')" \
+    && semgrep scan --validate --config /opt/rules/default.yaml --metrics=off
 RUN useradd --create-home --uid 1000 scanner
 COPY codescan /home/scanner/codescan
 COPY pipeline.py /home/scanner/pipeline.py
+COPY egress/scanner_entry.py /home/scanner/scanner_entry.py
+COPY egress/proxy.py /home/scanner/proxy.py
 WORKDIR /home/scanner
 USER scanner
-ENV PYTHONPATH=/home/scanner
-ENTRYPOINT ["python", "pipeline.py"]
+ENV PYTHONPATH=/home/scanner PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
+    SEMGREP_CONFIG=/opt/rules/default.yaml SEMGREP_SEND_METRICS=off \
+    SEMGREP_ENABLE_VERSION_CHECK=0 STRICT_SCAN=1 HOME=/tmp
+ENTRYPOINT ["python", "scanner_entry.py"]

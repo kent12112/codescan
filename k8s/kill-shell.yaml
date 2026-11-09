@@ -4,6 +4,8 @@ metadata:
   name: kill-shell
   namespace: scanner
 spec:
+  podSelector:
+    matchLabels: { app: cve-agent }
   kprobes:
   - call: "security_bprm_creds_from_file"
     syscall: false

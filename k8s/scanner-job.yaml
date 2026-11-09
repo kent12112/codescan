@@ -1,41 +1,106 @@
-# Reference template for the in-cluster scanner Job.
-# scan-job.sh renders this with a repo URL at launch time.
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: codescan
-  namespace: scanner
-spec:
-  backoffLimit: 0
-  ttlSecondsAfterFinished: 300
-  template:
-    metadata:
-      labels: { app: codescan-scanner }
-    spec:
-      restartPolicy: Never
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 1000
-        seccompProfile: { type: RuntimeDefault }
-      containers:
-      - name: scanner
-        image: docker.io/library/codescan-scanner:latest
-        imagePullPolicy: Never
-        args: ["REPO_URL_HERE"]
-        env:
-        - name: CVE_AGENT_URL
-          value: "http://cve-agent:9000/analyze"
-        - name: ANTHROPIC_API_KEY
-          valueFrom: { secretKeyRef: { name: anthropic, key: api-key } }
-        - name: HOME
-          value: /tmp
-        - name: PYTHONDONTWRITEBYTECODE
-          value: "1"
-        securityContext:
-          allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: true
-          capabilities: { drop: ["ALL"] }
-        volumeMounts: [{ name: tmp, mountPath: /tmp }]
-      volumes:
-      - name: tmp
-        emptyDir: {}
+{
+  "apiVersion": "batch/v1",
+  "kind": "Job",
+  "metadata": {
+    "name": "codescan",
+    "namespace": "scanner"
+  },
+  "spec": {
+    "backoffLimit": 0,
+    "activeDeadlineSeconds": 900,
+    "ttlSecondsAfterFinished": 300,
+    "template": {
+      "metadata": {
+        "labels": {
+          "app": "codescan-scanner"
+        }
+      },
+      "spec": {
+        "automountServiceAccountToken": false,
+        "enableServiceLinks": false,
+        "restartPolicy": "Never",
+        "securityContext": {
+          "runAsNonRoot": true,
+          "runAsUser": 1000,
+          "runAsGroup": 1000,
+          "fsGroup": 1000,
+          "seccompProfile": {
+            "type": "RuntimeDefault"
+          }
+        },
+        "containers": [
+          {
+            "name": "scanner",
+            "image": "docker.io/library/codescan-scanner:hardened-v1",
+            "imagePullPolicy": "IfNotPresent",
+            "args": [
+              "REPO_URL_HERE"
+            ],
+            "env": [
+              {
+                "name": "CVE_AGENT_URL",
+                "value": "http://cve-agent:9000/analyze"
+              },
+              {
+                "name": "ANTHROPIC_API_KEY",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "name": "anthropic",
+                    "key": "api-key"
+                  }
+                }
+              },
+              {
+                "name": "HTTPS_PROXY",
+                "value": "http://scanner-proxy:8080"
+              },
+              {
+                "name": "HTTP_PROXY",
+                "value": "http://scanner-proxy:8080"
+              },
+              {
+                "name": "NO_PROXY",
+                "value": "cve-agent,localhost,127.0.0.1"
+              }
+            ],
+            "securityContext": {
+              "allowPrivilegeEscalation": false,
+              "readOnlyRootFilesystem": true,
+              "capabilities": {
+                "drop": [
+                  "ALL"
+                ]
+              }
+            },
+            "resources": {
+              "requests": {
+                "cpu": "250m",
+                "memory": "256Mi",
+                "ephemeral-storage": "256Mi"
+              },
+              "limits": {
+                "cpu": "2",
+                "memory": "1536Mi",
+                "ephemeral-storage": "1Gi"
+              }
+            },
+            "volumeMounts": [
+              {
+                "name": "tmp",
+                "mountPath": "/tmp"
+              }
+            ]
+          }
+        ],
+        "volumes": [
+          {
+            "name": "tmp",
+            "emptyDir": {
+              "sizeLimit": "1Gi"
+            }
+          }
+        ]
+      }
+    }
+  }
+}

@@ -17,7 +17,11 @@ def throwaway_copy(source: str):
     work = Path(tempfile.mkdtemp(prefix="codescan-"))
     try:
         dest = work / src.name
-        shutil.copytree(src, dest)
+        # A repository symlink must never turn into a read of container files.
+        def ignored(directory, names):
+            return [name for name in names if name in SKIP
+                    or Path(directory, name).is_symlink()]
+        shutil.copytree(src, dest, ignore=ignored)
         yield dest
     finally:
         shutil.rmtree(work, ignore_errors=True)

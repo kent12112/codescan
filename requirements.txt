@@ -1,0 +1,5 @@
+# Local pipeline and benchmark dependencies (target app dependencies are separate).
+anthropic==0.125.0
+semgrep==1.136.0
+# Semgrep's instrumentation imports pkg_resources, removed by newer setuptools.
+setuptools==80.9.0

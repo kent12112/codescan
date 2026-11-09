@@ -1,6 +1,6 @@
 """codescan — scan any repo and print a unified report.
 
-Static (local, sandboxed): Semgrep + injection scan.
+Static (inside the scanner Job): Semgrep + injection scan.
 Agentic analyst (contained pod, over HTTP): code reasoning + dependency CVEs.
 Dynamic (optional): if DAST_REPORT points to a ZAP JSON report, its findings
 fold into the same synthesis. Everything merged by synthesis + authority backstop.
@@ -35,8 +35,8 @@ def scan(path):
     with throwaway_copy(path) as work:
         semgrep_findings = run_semgrep(work)
         injection_findings = find_injections(work)
-    findings = semgrep_findings + injection_findings
-    findings += analyze_via_agent(path, injection_flags=injection_findings)
+        findings = semgrep_findings + injection_findings
+        findings += analyze_via_agent(work, injection_flags=injection_findings)
     dast_report = os.environ.get("DAST_REPORT")
     if dast_report:
         findings += dast_findings(dast_report)      # fold in dynamic findings

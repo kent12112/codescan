@@ -1,0 +1,8 @@
+.git
+.venv
+**/__pycache__
+**/*.pyc
+.env
+**/.env
+agent_audit.jsonl
+revoked_tokens.txt

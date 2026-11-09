@@ -7,8 +7,10 @@ control; body inspection would require TLS termination (the advanced version).
 """
 import socket
 import threading
+import os
 
-ALLOWLIST = {"api.anthropic.com", "api.osv.dev"}
+# The analyst keeps its narrow default; the scanner proxy has a separate list.
+ALLOWLIST = set(os.environ.get("EGRESS_HOSTS", "api.anthropic.com,api.osv.dev").split(","))
 LISTEN = ("0.0.0.0", 8080)
 
 
@@ -22,7 +24,7 @@ def handle(client):
         host, _, port = parts[1].partition(":")
         port = int(port or 443)
 
-        if host not in ALLOWLIST:
+        if host not in ALLOWLIST or port != 443:
             print(f"  [EGRESS BLOCKED] {host}:{port}")
             client.sendall(b"HTTP/1.1 403 Forbidden\r\n\r\nblocked by egress allowlist")
             return

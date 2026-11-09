@@ -74,6 +74,8 @@ def analyze_via_agent(repo_path, injection_flags=None, url=AGENT_URL, timeout=24
         with _opener.open(request, timeout=timeout) as resp:
             data = json.loads(resp.read())
     except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
+        if os.environ.get("STRICT_SCAN") == "1":
+            raise RuntimeError("Contained analyst unavailable; scan incomplete") from exc
         print(f"[warning] agent unreachable ({exc}); skipping agentic analysis. "
               f"Is the pod running and port-forwarded at {url}?", file=sys.stderr)
         return []
