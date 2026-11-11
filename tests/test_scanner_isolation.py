@@ -8,20 +8,20 @@ from unittest.mock import patch
 
 from codescan.workspace import throwaway_copy
 from codescan.semgrep_scan import run_semgrep
-from egress.scanner_entry import unpack, wait_for_isolation
+from codescan.entrypoint import unpack, wait_for_isolation
 from tools.scan_job import bundle_source, make_job
 from tools.scan_job import main as launch_scan
 
 
 class IsolationTests(unittest.TestCase):
-    @patch('egress.scanner_entry.time.sleep')
-    @patch('egress.scanner_entry.socket.create_connection')
+    @patch('codescan.entrypoint.time.sleep')
+    @patch('codescan.entrypoint.socket.create_connection')
     def test_missing_network_enforcement_refuses_to_start(self, connect, sleep):
         with self.assertRaisesRegex(RuntimeError, 'refusing to read scan input'):
             wait_for_isolation()
         self.assertTrue(connect.called)
 
-    @patch('egress.scanner_entry.socket.create_connection', side_effect=OSError('denied'))
+    @patch('codescan.entrypoint.socket.create_connection', side_effect=OSError('denied'))
     def test_network_guard_accepts_blocked_connections(self, connect):
         wait_for_isolation()
         self.assertEqual(connect.call_count, 2)
@@ -76,8 +76,8 @@ class IsolationTests(unittest.TestCase):
         self.assertTrue(container['securityContext']['readOnlyRootFilesystem'])
         self.assertEqual(container['securityContext']['capabilities']['drop'], ['ALL'])
         self.assertTrue(container['resources']['limits']['memory'])
-        self.assertTrue(container['volumeMounts'][1]['readOnly'])
-        self.assertEqual(container['env'][1]['valueFrom']['secretKeyRef']['name'], 'anthropic')
+        self.assertTrue(all(mount.get('readOnly') for mount in container['volumeMounts'] if mount['name'] != 'tmp'))
+        self.assertFalse(any(env.get('valueFrom', {}).get('secretKeyRef', {}).get('name') == 'anthropic' for env in container['env']))
 
     @patch.dict('os.environ', {'STRICT_SCAN': '1'})
     @patch('codescan.semgrep_scan.subprocess.run')
@@ -99,7 +99,7 @@ class IsolationTests(unittest.TestCase):
         command.side_effect = response
         with tempfile.TemporaryDirectory() as directory:
             (Path(directory) / 'app.py').write_text('print(1)')
-            with patch('sys.argv', ['scan_job.py', directory]):
+            with patch('sys.argv', ['scan_job.py', directory, '--report-dir', str(Path(directory)/'reports')]):
                 with self.assertRaisesRegex(RuntimeError, 'scanner Job failed'):
                     launch_scan()
         calls = [call.args for call in command.call_args_list]

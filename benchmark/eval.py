@@ -2,7 +2,7 @@
 import json, tempfile, shutil, sys
 from pathlib import Path
 from collections import defaultdict
-from codescan.analyst import analyze_code
+from benchmark.baseline_analyst import analyze_code
 from codescan.semgrep_scan import run_semgrep
 
 SAMPLES = Path("benchmark/samples")

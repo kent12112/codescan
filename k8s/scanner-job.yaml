@@ -31,7 +31,7 @@
         "containers": [
           {
             "name": "scanner",
-            "image": "docker.io/library/codescan-scanner:hardened-v1",
+            "image": "docker.io/library/codescan-scanner:team-v1",
             "imagePullPolicy": "IfNotPresent",
             "args": [
               "REPO_URL_HERE"
@@ -39,16 +39,7 @@
             "env": [
               {
                 "name": "CVE_AGENT_URL",
-                "value": "http://cve-agent:9000/analyze"
-              },
-              {
-                "name": "ANTHROPIC_API_KEY",
-                "valueFrom": {
-                  "secretKeyRef": {
-                    "name": "anthropic",
-                    "key": "api-key"
-                  }
-                }
+                "value": "https://cve-agent:9000/analyze"
               },
               {
                 "name": "HTTPS_PROXY",
@@ -61,6 +52,14 @@
               {
                 "name": "NO_PROXY",
                 "value": "cve-agent,localhost,127.0.0.1"
+              },
+              {
+                "name": "LLM_GATEWAY_URL",
+                "value": "https://llm-gateway:8443"
+              },
+              {
+                "name": "REQUIRE_GATEWAY",
+                "value": "1"
               }
             ],
             "securityContext": {
@@ -88,6 +87,11 @@
               {
                 "name": "tmp",
                 "mountPath": "/tmp"
+              },
+              {
+                "name": "workload-tls",
+                "mountPath": "/etc/workload-tls",
+                "readOnly": true
               }
             ]
           }
@@ -97,6 +101,13 @@
             "name": "tmp",
             "emptyDir": {
               "sizeLimit": "1Gi"
+            }
+          },
+          {
+            "name": "workload-tls",
+            "secret": {
+              "secretName": "scanner-tls",
+              "defaultMode": 288
             }
           }
         ]

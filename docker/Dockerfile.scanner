@@ -1,19 +1,25 @@
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:4840d514c583a4d3d8cad3940e68dee6f0f6f3635c12fcd0a3d74c21a5b93a54 AS engine
+RUN pip install --no-cache-dir semgrep==1.184.0
+COPY docker/prepare_engine.py /prepare_engine.py
+RUN python /prepare_engine.py
+
+# Scanner image: used only by the scanner Job (k8s/scanner-job.yaml).
+# ENTRYPOINT -> codescan/entrypoint.py -> pipeline.py. The Job passes only `args`,
+# so this entrypoint always runs.
+FROM python:3.12-slim@sha256:4840d514c583a4d3d8cad3940e68dee6f0f6f3635c12fcd0a3d74c21a5b93a54
 RUN apt-get update && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
-COPY requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir -r /tmp/requirements.txt
-# Freeze the registry rule snapshot into the image, outside hostile repositories.
-RUN mkdir -p /opt/rules && python -c "import urllib.request; urllib.request.urlretrieve('https://semgrep.dev/c/p/default', '/opt/rules/default.yaml')" \
-    && semgrep scan --validate --config /opt/rules/default.yaml --metrics=off
+COPY dependencies/scanner.lock /tmp/runtime.lock
+RUN pip install --no-cache-dir --require-hashes -r /tmp/runtime.lock
+COPY --from=engine /usr/local/lib/python3.12/site-packages/semgrep/bin/semgrep-core /usr/local/bin/semgrep-core
+COPY --from=engine /opt/rules /opt/rules
 RUN useradd --create-home --uid 1000 scanner
 COPY codescan /home/scanner/codescan
+COPY service /home/scanner/service
 COPY pipeline.py /home/scanner/pipeline.py
-COPY egress/scanner_entry.py /home/scanner/scanner_entry.py
-COPY egress/proxy.py /home/scanner/proxy.py
 WORKDIR /home/scanner
 USER scanner
 ENV PYTHONPATH=/home/scanner PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
-    SEMGREP_CONFIG=/opt/rules/default.yaml SEMGREP_SEND_METRICS=off \
-    SEMGREP_ENABLE_VERSION_CHECK=0 STRICT_SCAN=1 HOME=/tmp
-ENTRYPOINT ["python", "scanner_entry.py"]
+    SEMGREP_CORE=/usr/local/bin/semgrep-core SEMGREP_CONFIG=/opt/rules/default.yaml SEMGREP_SEND_METRICS=off \
+    SEMGREP_ENABLE_VERSION_CHECK=0 STRICT_SCAN=1 REQUIRE_GATEWAY=1 HOME=/tmp
+ENTRYPOINT ["python", "-m", "codescan.entrypoint"]

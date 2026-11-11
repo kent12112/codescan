@@ -1,35 +1,74 @@
-"""mitmproxy egress WAF: destination allowlist + decrypted request-body inspection.
+"""Legacy mitmproxy addon, retained for the earlier lab demo.
 
-This TERMINATES TLS for intercepted hosts, so it can read the request body and
-block secrets being smuggled out — even to an allowlisted destination. The LLM
-host (api.anthropic.com) is raw-tunneled via --ignore-hosts (not intercepted).
-'A WAF turned to face outbound, filtering to the request body.'
+The active team deployment uses service/osv_broker.py and has no mitmproxy dependency.
 """
-import re
 from mitmproxy import http
-
-ALLOWLIST = {"api.osv.dev"}
-SECRET_PATTERNS = [
-    re.compile(rb"internal-api-key", re.I),
-    re.compile(rb"sk-[A-Za-z0-9]{16,}"),
-    re.compile(rb"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
-    re.compile(rb"[A-Za-z0-9+/]{120,}={0,2}"),
-]
+import os
+from pathlib import Path
+import sys
+# mitmdump loads this addon by file path; make the repository's policy importable.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from service.osv_policy import check_headers, check_body
 
 
-def request(flow: http.HTTPFlow):
-    host = flow.request.pretty_host
+def block(flow, reason):
+    flow.response = http.Response.make(403, b'blocked by OSV egress policy',
+                                       {'Content-Type': 'text/plain'})
+    # Never log bodies, headers, package names, or credential-shaped matches.
+    print('[OSV WAF] BLOCKED: ' + reason, flush=True)
 
-    if host not in ALLOWLIST:
-        flow.response = http.Response.make(403, b"blocked: host not allowlisted")
-        print(f"[WAF] BLOCKED host: {host}")
+
+def running():
+    # The supervisor opens its frontend only after the addon is loaded.
+    marker = os.environ.get('WAF_READY_FILE')
+    if marker:
+        Path(marker).write_text('ready\n')
+
+
+def _requestheaders(flow):
+    if flow.server_conn.address != ('api.osv.dev', 443):
+        block(flow, 'upstream destination not allowed')
         return
+    request = flow.request
+    reason = check_headers(request.method, request.scheme, request.host,
+                           request.port, request.path, list(request.headers.items(multi=True)))
+    if reason:
+        block(flow, reason)
 
-    body = flow.request.raw_content or b""     # decrypted plaintext body
-    for pat in SECRET_PATTERNS:
-        if pat.search(body):
-            flow.response = http.Response.make(403, b"blocked: sensitive data in request body")
-            print(f"[WAF] BLOCKED exfil to {host}: body matches /{pat.pattern.decode()}/")
-            return
 
-    print(f"[WAF] ALLOWED {flow.request.method} {host}{flow.request.path} ({len(body)}B body)")
+def requestheaders(flow):
+    try:
+        _requestheaders(flow)
+    except Exception:
+        block(flow, 'header inspection failed')
+
+
+def _request(flow):
+    if flow.response is not None:
+        return
+    requestheaders(flow)
+    if flow.response is not None:
+        return
+    body = flow.request.raw_content or b''
+    if len(body) != int(flow.request.headers['content-length']):
+        block(flow, 'body length mismatch')
+        return
+    reason = check_body(body)
+    if reason:
+        block(flow, reason)
+        return
+    # Drop caller-controlled metadata before forwarding a validated request.
+    flow.request.headers.clear()
+    flow.request.headers['Host'] = 'api.osv.dev'
+    flow.request.headers['Content-Type'] = 'application/json'
+    flow.request.headers['Content-Length'] = str(len(body))
+    flow.request.headers['Accept'] = 'application/json'
+    flow.request.headers['User-Agent'] = 'codescan-osv/1'
+    print('[OSV WAF] ALLOWED: dependency query', flush=True)
+
+
+def request(flow):
+    try:
+        _request(flow)
+    except Exception:
+        block(flow, 'body inspection failed')

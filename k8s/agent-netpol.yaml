@@ -1,18 +1,23 @@
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
-metadata:
-  name: agent-egress
-  namespace: scanner
+metadata: { name: agent-egress, namespace: scanner }
 spec:
   podSelector:
     matchLabels: { app: cve-agent }
-  policyTypes: [Egress]
+  policyTypes: [Ingress, Egress]
+  ingress:
+  - from:
+    - podSelector: { matchLabels: { app: codescan-scanner } }
+    ports: [{ protocol: TCP, port: 9000 }]
   egress:
   - to:
     - podSelector: { matchLabels: { app: egress-proxy } }
-    ports: [{ protocol: TCP, port: 8080 }]
+    ports: [{ protocol: TCP, port: 8443 }]
   - to:
-    - namespaceSelector: {}
-    ports:
-    - { protocol: UDP, port: 53 }
-    - { protocol: TCP, port: 53 }
+    - podSelector: { matchLabels: { app: llm-gateway } }
+    ports: [{ protocol: TCP, port: 8443 }]
+  - to:
+    - namespaceSelector:
+        matchLabels: { kubernetes.io/metadata.name: kube-system }
+      podSelector: { matchLabels: { k8s-app: kube-dns } }
+    ports: [{ protocol: UDP, port: 53 }, { protocol: TCP, port: 53 }]

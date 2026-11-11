@@ -14,6 +14,11 @@ import time
 import uuid
 from urllib.parse import urlsplit
 
+try:
+    from tools.reports import extract_report, save_and_render, save_failure
+except ModuleNotFoundError:
+    from reports import extract_report, save_and_render, save_failure
+
 ROOT = Path(__file__).resolve().parents[1]
 SKIP = {'.git', '.venv', 'venv', '__pycache__', 'node_modules', 'dist', 'build',
         '.next', 'vendor', '.ssh', '.aws', '.kube'}
@@ -79,6 +84,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('source', help='local directory or HTTPS GitHub repository URL')
     parser.add_argument('--dast-report', type=Path)
+    parser.add_argument('--report-dir', type=Path, default=ROOT / 'reports')
     args = parser.parse_args()
     payload = {}
     path = Path(args.source)
@@ -127,13 +133,18 @@ def main():
             result = kubectl('get', 'job', name, '-n', 'scanner', '-o', 'json', capture_output=True, text=True)
             status = json.loads(result.stdout).get('status', {})
             if status.get('succeeded') or status.get('failed'):
-                kubectl('logs', 'job/' + name, '-n', 'scanner', '--pod-running-timeout=10s')
+                logs = kubectl('logs', 'job/' + name, '-n', 'scanner', '--pod-running-timeout=10s', '--limit-bytes=2097152', capture_output=True, text=True)
                 if not status.get('succeeded'):
+                    # Exception traces can include untrusted text; do not print raw logs.
+                    save_failure(logs.stdout, name, args.report_dir)
                     raise RuntimeError('scanner Job failed: ' + name)
+                save_and_render(extract_report(logs.stdout), name, args.report_dir)
                 return
             time.sleep(2)
-        kubectl('describe', 'job', name, '-n', 'scanner')
-        kubectl('logs', 'job/' + name, '-n', 'scanner', '--pod-running-timeout=10s')
+        logs = kubectl('logs', 'job/' + name, '-n', 'scanner',
+                       '--pod-running-timeout=10s', '--limit-bytes=2097152',
+                       capture_output=True, text=True)
+        save_failure(logs.stdout, name, args.report_dir)
         raise TimeoutError('scanner Job timed out')
     finally:
         # Tear down the Pod (and its secret environment) before removing its input.

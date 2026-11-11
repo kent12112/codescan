@@ -19,13 +19,17 @@ spec:
         runAsGroup: 1000
         seccompProfile: { type: RuntimeDefault }
       containers:
+      # Allowlist CONNECT proxy (egress/proxy.py) that lets the scanner Job clone
+      # from github.com only. It reuses the gateway image, which ships proxy.py;
+      # `command` replaces that image's gunicorn ENTRYPOINT so only the proxy runs.
+      # It deliberately does NOT use the scanner image (no semgrep/git/pipeline here).
       - name: proxy
-        image: docker.io/library/codescan-scanner:hardened-v1
+        image: docker.io/library/codescan-gateway:team-v1
         imagePullPolicy: IfNotPresent
-        command: [python, /home/scanner/proxy.py]
+        command: [python, /app/proxy.py]
         env:
         - name: EGRESS_HOSTS
-          value: api.anthropic.com,github.com
+          value: github.com
         ports: [{ containerPort: 8080 }]
         readinessProbe:
           tcpSocket: { port: 8080 }

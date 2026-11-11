@@ -5,37 +5,46 @@ metadata:
   namespace: scanner
   labels: { app: cve-agent }
 spec:
+  automountServiceAccountToken: false
   restartPolicy: Always
   securityContext:
     runAsNonRoot: true
     runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
     seccompProfile: { type: RuntimeDefault }
   containers:
   - name: agent
-    image: docker.io/library/codescan-agent:latest
-    imagePullPolicy: Never
+    image: docker.io/library/codescan-agent:team-v1
+    imagePullPolicy: IfNotPresent
     ports:
     - containerPort: 9000
     env:
-    - name: ANTHROPIC_API_KEY
-      valueFrom: { secretKeyRef: { name: anthropic, key: api-key } }
+    - { name: LLM_GATEWAY_URL, value: 'https://llm-gateway:8443' }
+    - { name: REQUIRE_GATEWAY, value: '1' }
     - name: PYTHONDONTWRITEBYTECODE
       value: "1"
     - name: AGENT_LOG
       value: /tmp/agent_audit.jsonl
-    - name: HTTPS_PROXY
-      value: http://egress-proxy:8080
-    - name: HTTP_PROXY
-      value: http://egress-proxy:8080
+    - { name: OSV_QUERY_URL, value: 'https://egress-proxy:8443/v1/query' }
     readinessProbe:
-      httpGet: { path: /healthz, port: 9000 }
+      tcpSocket: { port: 9000 }
       initialDelaySeconds: 2
       periodSeconds: 5
+    resources:
+      requests: { cpu: 100m, memory: 128Mi }
+      limits: { cpu: '1', memory: 512Mi, ephemeral-storage: 128Mi }
     securityContext:
       allowPrivilegeEscalation: false
       readOnlyRootFilesystem: true
       capabilities: { drop: ["ALL"] }
-    volumeMounts: [{ name: tmp, mountPath: /tmp }]
+    volumeMounts:
+    - { name: tmp, mountPath: /tmp }
+    - { name: workload-tls, mountPath: /etc/workload-tls, readOnly: true }
   volumes:
   - name: tmp
-    emptyDir: {}
+    emptyDir: { sizeLimit: 128Mi }
+  - name: workload-tls
+    secret:
+      secretName: analyst-tls
+      defaultMode: 288

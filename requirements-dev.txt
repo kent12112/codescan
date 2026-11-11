@@ -1,0 +1,4 @@
+# Run tests with Python 3.12+; orchestration itself uses only the standard library.
+-r requirements.txt
+-r requirements-service.txt
+cryptography==50.0.2

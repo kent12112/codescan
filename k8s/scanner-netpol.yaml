@@ -13,6 +13,9 @@ spec:
     - podSelector: { matchLabels: { app: cve-agent } }
     ports: [{ protocol: TCP, port: 9000 }]
   - to:
+    - podSelector: { matchLabels: { app: llm-gateway } }
+    ports: [{ protocol: TCP, port: 8443 }]
+  - to:
     - podSelector: { matchLabels: { app: scanner-proxy } }
     ports: [{ protocol: TCP, port: 8080 }]
   - to:

@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 import socket
 import urllib.request
-from scanner_entry import wait_for_isolation
+from codescan.entrypoint import wait_for_isolation
 
 wait_for_isolation()
 
@@ -38,7 +38,15 @@ assert b'403' in connection.recv(1024)
 connection.close()
 print('PASS: proxy rejects unapproved port', flush=True)
 opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-assert opener.open('http://cve-agent:9000/healthz', timeout=5).status == 200
+import ssl
+context = ssl.create_default_context(cafile='/etc/workload-tls/ca.crt')
+context.load_cert_chain('/etc/workload-tls/tls.crt', '/etc/workload-tls/tls.key')
+opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPSHandler(context=context))
+assert opener.open('https://cve-agent:9000/healthz', timeout=5).status == 200
+assert opener.open('https://llm-gateway:8443/healthz', timeout=5).status == 200
+assert not os.environ.get('ANTHROPIC_API_KEY')
+assert not Path('/etc/provider-key').exists()
+print('PASS: gateway and analyst require workload certificates; provider key absent', flush=True)
 print('PASS: contained analyst reachable', flush=True)
 # Also verify cloning can use the allowed HTTPS destination without model usage.
 import subprocess

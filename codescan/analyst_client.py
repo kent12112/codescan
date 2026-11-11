@@ -14,11 +14,12 @@ from pathlib import Path
 
 from codescan.workspace import source_files
 from codescan.injection import find_injections
+from codescan.llm_client import workload_context
+from service.findings import validate_findings
 
-AGENT_URL = os.environ.get("CVE_AGENT_URL", "http://localhost:9000/analyze")
+AGENT_URL = os.environ.get("CVE_AGENT_URL", "https://cve-agent:9000/analyze")
 _SEV = {"HIGH", "MEDIUM", "LOW"}
 _MAX_BUNDLE = 80_000
-_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 def _bundle(repo_path):
@@ -30,8 +31,7 @@ def _bundle(repo_path):
             continue
         chunk = f"\n### {os.path.relpath(f, repo_path)}\n{text}\n"
         if total + len(chunk) > _MAX_BUNDLE:
-            parts.append("\n### [truncated — bundle size limit]\n")
-            break
+            raise ValueError("source bundle exceeds the analyst context limit; split the target")
         parts.append(chunk)
         total += len(chunk)
     return "".join(parts)
@@ -41,7 +41,11 @@ def _requirements(repo_path):
     root = Path(repo_path)
     for p in [root / "requirements.txt", *root.rglob("requirements*.txt")]:
         if p.is_file():
-            return p.read_text(errors="replace")
+            with p.open(errors="replace") as source:
+                content = source.read(16001)
+            if len(content) > 16000:
+                raise ValueError("dependency manifest exceeds analyst input limit")
+            return content
     return ""
 
 
@@ -58,6 +62,8 @@ def _injection_warning(flags):
 
 
 def analyze_via_agent(repo_path, injection_flags=None, url=AGENT_URL, timeout=240):
+    if not url.startswith('https://'):
+        raise RuntimeError('analyst requires mutually authenticated HTTPS')
     code = _bundle(repo_path)
     if not code.strip():
         return []
@@ -71,13 +77,21 @@ def analyze_via_agent(repo_path, injection_flags=None, url=AGENT_URL, timeout=24
     request = urllib.request.Request(
         url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
     try:
-        with _opener.open(request, timeout=timeout) as resp:
-            data = json.loads(resp.read())
-    except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}),
+            urllib.request.HTTPSHandler(context=workload_context()))
+        with opener.open(request, timeout=timeout) as resp:
+            raw = resp.read(1024 * 1024 + 1)
+            if len(raw) > 1024 * 1024:
+                raise ValueError('analyst response too large')
+            data = json.loads(raw)
+        if not isinstance(data, dict) or data.get('note') or 'findings' not in data:
+            raise ValueError('incomplete analyst response')
+        validate_findings(data['findings'])
+    except (urllib.error.URLError, OSError, ValueError) as exc:
         if os.environ.get("STRICT_SCAN") == "1":
             raise RuntimeError("Contained analyst unavailable; scan incomplete") from exc
         print(f"[warning] agent unreachable ({exc}); skipping agentic analysis. "
-              f"Is the pod running and port-forwarded at {url}?", file=sys.stderr)
+              f"Is the authenticated analyst service available at {url}?", file=sys.stderr)
         return []
 
     findings = []

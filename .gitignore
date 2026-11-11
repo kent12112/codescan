@@ -2,6 +2,8 @@
 __pycache__/
 *.pyc
 .env
+reports/
+artifacts/
 agent_audit.jsonl
 revoked_tokens.txt
 dast/zap/report.json

@@ -6,3 +6,6 @@
 **/.env
 agent_audit.jsonl
 revoked_tokens.txt
+
+reports
+artifacts

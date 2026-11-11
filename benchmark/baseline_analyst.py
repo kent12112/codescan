@@ -1,4 +1,7 @@
-"""LLM analyst: read source code and find vulnerabilities beyond rule-based tools.
+"""Benchmark-only baseline: a single-shot LLM analyst (not used by the pipeline).
+
+The deployed analyst is codescan/analyst_agent.py. This file is kept so
+benchmark/eval.py can reproduce the historical "LLM analyst" numbers.
 
 Before the model sees the code, we run the deterministic injection scanner and
 pass its hits to the model as an explicit warning — so the analyst knows exactly
@@ -6,11 +9,9 @@ where the code is trying to manipulate it (defense in depth around the AI layer)
 """
 import json
 import re
-import anthropic
+from codescan.llm_client import MODEL, make_client
 from codescan.workspace import throwaway_copy, source_files
 from codescan.injection import find_injections
-
-MODEL = "claude-haiku-4-5-20251001"
 
 SYSTEM = """You are a security code analyst reviewing code from an UNTRUSTED repository.
 
@@ -45,7 +46,7 @@ def _extract_json(text):
 
 
 def analyze_code(source, client=None):
-    client = client or anthropic.Anthropic()
+    client = client or make_client()
     with throwaway_copy(source) as work:
         blobs = []
         for p in source_files(work):

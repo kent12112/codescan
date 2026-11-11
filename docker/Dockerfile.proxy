@@ -1,6 +1,11 @@
-FROM python:3.12-slim
-RUN useradd --create-home --uid 1000 proxyuser
-COPY egress/proxy.py /proxy.py
+# Despite the name, this is the OSV broker image (service/osv_broker.py), deployed
+# as `egress-proxy` in k8s/proxy.yaml. It does NOT contain egress/proxy.py; the
+# CONNECT proxies run from the gateway image (see Dockerfile.gateway).
+FROM python:3.12-slim@sha256:4840d514c583a4d3d8cad3940e68dee6f0f6f3635c12fcd0a3d74c21a5b93a54
+COPY dependencies/proxy.lock /tmp/runtime.lock
+RUN pip install --no-cache-dir --require-hashes -r /tmp/runtime.lock && useradd --create-home --uid 1000 proxyuser
+COPY service /app/service
+WORKDIR /app
 USER proxyuser
-EXPOSE 8080
-ENTRYPOINT ["python", "/proxy.py"]
+ENV PYTHONPATH=/app PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 SERVICE_BIND=0.0.0.0:8443
+ENTRYPOINT ["gunicorn", "-c", "service/gunicorn_config.py", "service.osv_broker:create_app()"]

@@ -5,13 +5,13 @@ Agentic analyst (contained pod, over HTTP): code reasoning + dependency CVEs.
 Dynamic (optional): if DAST_REPORT points to a ZAP JSON report, its findings
 fold into the same synthesis. Everything merged by synthesis + authority backstop.
 """
-import os, sys, subprocess, tempfile, shutil
+import os, sys, subprocess, tempfile, shutil, json
 from contextlib import contextmanager
 from codescan.workspace import throwaway_copy
 from codescan.semgrep_scan import run_semgrep
 from codescan.injection import find_injections
-from codescan.cve_client import analyze_via_agent
-from codescan.dast_client import dast_findings
+from codescan.analyst_client import analyze_via_agent
+from codescan.zap_report import dast_findings
 from codescan.synthesize import synthesize
 
 
@@ -52,11 +52,8 @@ def main():
         results = scan(path)
         if not results:
             print("no findings — clean, or no supported source files.")
-        for m in results:
-            srcs = ", ".join(m.get("sources", []))
-            flag = "  [recovered by authority]" if m.get("recovered_by_authority") else ""
-            print(f"[{m['severity']}] {m['title']}  ({m.get('confidence')}; via {srcs}){flag}")
-            print(f"    {m.get('summary', '')}")
+        # One escaped JSON record; human rendering happens in the trusted runner.
+        print('CODESCAN_REPORT=' + json.dumps({'schema_version': 1, 'findings': results}, ensure_ascii=True))
 
 
 if __name__ == "__main__":

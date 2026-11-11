@@ -11,6 +11,10 @@ SEV = {"ERROR": "HIGH", "WARNING": "MEDIUM", "INFO": "LOW"}
 def run_semgrep(root, config=None):
     """Run Semgrep on `root`; return normalized findings. Warns (not silent) on failure."""
     config = config or os.environ.get("SEMGREP_CONFIG", "p/default")
+    if os.environ.get('SEMGREP_CORE'):
+        from codescan.native_semgrep import run
+        data = run(root, config)
+        return normalize(data)
     try:
         proc = subprocess.run(
             ["semgrep", "scan", "--config", config, "--json", "--quiet",
@@ -37,6 +41,10 @@ def run_semgrep(root, config=None):
         print(f"[warning] semgrep reported {len(data['errors'])} error(s); "
               f"results may be incomplete", file=sys.stderr)
 
+    return normalize(data)
+
+
+def normalize(data):
     findings = []
     for r in data.get("results", []):
         extra = r.get("extra", {})

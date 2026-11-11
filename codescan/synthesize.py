@@ -8,9 +8,8 @@ recovered and flagged. The check, not the model, decides on HIGH findings.
 """
 import json
 import re
-import anthropic
+from codescan.llm_client import MODEL, make_client
 
-MODEL = "claude-haiku-4-5-20251001"
 SEV = {"HIGH": 3, "MEDIUM": 2, "LOW": 1, "INFO": 0}
 
 SYSTEM = """You are a security findings synthesis agent.
@@ -47,13 +46,11 @@ def _recover_dropped(findings, merged):
             idx_to_entry[i] = m
     recovered = []
     for i, f in enumerate(findings):
-        if SEV.get(f.get("severity"), 0) < SEV["HIGH"]:
-            continue                                   # only guard HIGH
         entry = idx_to_entry.get(i)
-        if entry is None or SEV.get(entry.get("severity"), 0) < SEV["HIGH"]:
+        if entry is None or SEV.get(entry.get("severity"), 0) < SEV.get(f.get("severity"), 0):
             recovered.append({
                 "title": f.get("title", "(recovered)"),
-                "severity": "HIGH", "confidence": "single-source",
+                "severity": f.get('severity', 'MEDIUM'), "confidence": "single-source",
                 "sources": [f.get("tool")], "sources_idx": [i],
                 "summary": f.get("message", ""), "recovered_by_authority": True,
             })
@@ -61,17 +58,17 @@ def _recover_dropped(findings, merged):
 
 
 def synthesize(findings, client=None):
-    client = client or anthropic.Anthropic()
+    client = client or make_client()
     indexed = [{**f, "idx": i} for i, f in enumerate(findings)]
     msg = client.messages.create(
         model=MODEL, max_tokens=2048, system=SYSTEM,
         messages=[{"role": "user", "content": f"Findings:\n{json.dumps(indexed, indent=2)}"}],
     )
     merged = _extract_json(msg.content[0].text)
-    merged = _normalize_confidence(merged)
+    merged = _validate_merged(merged, findings)
     recovered = _recover_dropped(findings, merged)
     if recovered:
-        print(f"  [AUTHORITY] recovered {len(recovered)} HIGH finding(s) the synthesis dropped/downgraded")
+        print(f"  [AUTHORITY] recovered {len(recovered)} raw finding(s) the synthesis dropped/downgraded")
     return sorted(merged + recovered, key=lambda m: SEV.get(m.get('severity'), 0), reverse=True)
 
 
@@ -86,3 +83,24 @@ def _normalize_confidence(merged):
         m["sources"] = seen
         m["confidence"] = "confirmed" if len(seen) >= 2 else "single-source"
     return merged
+
+
+def _validate_merged(merged, findings):
+    if not isinstance(merged, list) or len(merged) > max(100, len(findings) * 2):
+        raise ValueError('invalid synthesis result')
+    seen = set()
+    for entry in merged:
+        if not isinstance(entry, dict) or entry.get('severity') not in SEV:
+            raise ValueError('invalid synthesis entry')
+        for key, limit in [('title', 200), ('summary', 8192)]:
+            if not isinstance(entry.get(key), str) or not 0 < len(entry[key]) <= limit:
+                raise ValueError('invalid synthesis text')
+        indices = entry.get('sources_idx')
+        if not isinstance(indices, list) or not indices or any(type(i) is not int or not 0 <= i < len(findings) for i in indices):
+            raise ValueError('invalid synthesis evidence')
+        if len(set(indices)) != len(indices) or seen.intersection(indices):
+            raise ValueError('duplicate synthesis evidence')
+        seen.update(indices)
+        # The model cannot invent corroboration from a method that never ran.
+        entry['sources'] = list(dict.fromkeys(findings[i]['tool'] for i in indices))
+    return _normalize_confidence(merged)

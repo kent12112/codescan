@@ -7,7 +7,13 @@ REPO="${1:?usage: ./run-scan.sh <repo-path-or-url> [dast-target-url]}"
 DAST_TARGET="${2:-}"
 
 echo "==> ensuring agent, proxy, policies are applied"
+kubectl get secret scanner-tls analyst-tls llm-gateway-tls osv-broker-tls -n scanner -o name >/dev/null
+kubectl apply -f k8s/llm-gateway.yaml >/dev/null
+kubectl rollout status deployment/llm-egress-proxy -n scanner --timeout=120s
+kubectl rollout status deployment/llm-gateway -n scanner --timeout=120s
 kubectl apply -f k8s/proxy.yaml        >/dev/null
+kubectl rollout status deployment/osv-egress-proxy -n scanner --timeout=120s
+kubectl rollout status deployment/egress-proxy -n scanner --timeout=120s
 kubectl apply -f k8s/agent-netpol.yaml >/dev/null
 kubectl apply -f k8s/agent-svc.yaml    >/dev/null
 kubectl apply -f k8s/agent-pod.yaml    >/dev/null

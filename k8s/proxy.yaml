@@ -1,8 +1,6 @@
 apiVersion: apps/v1
 kind: Deployment
-metadata:
-  name: egress-proxy
-  namespace: scanner
+metadata: { name: egress-proxy, namespace: scanner }
 spec:
   replicas: 1
   selector:
@@ -11,25 +9,113 @@ spec:
     metadata:
       labels: { app: egress-proxy }
     spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+      - name: proxy
+        image: docker.io/library/codescan-proxy:team-v1
+        imagePullPolicy: IfNotPresent
+        ports: [{ containerPort: 8443 }]
+        readinessProbe:
+          tcpSocket: { port: 8443 }
+          periodSeconds: 3
+        resources:
+          requests: { cpu: 50m, memory: 96Mi }
+          limits: { cpu: 500m, memory: 256Mi }
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: { drop: [ALL] }
+        volumeMounts:
+        - { name: tmp, mountPath: /tmp }
+        - { name: identity, mountPath: /etc/workload-tls, readOnly: true }
+      volumes:
+      - { name: tmp, emptyDir: { sizeLimit: 32Mi } }
+      - name: identity
+        secret: { secretName: osv-broker-tls, defaultMode: 288 }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: egress-proxy, namespace: scanner }
+spec:
+  selector: { app: egress-proxy }
+  ports: [{ port: 8443, targetPort: 8443 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: osv-egress-proxy, namespace: scanner }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: osv-egress-proxy }
+  template:
+    metadata:
+      labels: { app: osv-egress-proxy }
+    spec:
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
         seccompProfile: { type: RuntimeDefault }
       containers:
       - name: proxy
-        image: docker.io/library/codescan-proxy:latest
-        imagePullPolicy: Never
-        ports: [{ containerPort: 8080 }]
+        image: docker.io/library/codescan-gateway:team-v1
+        imagePullPolicy: IfNotPresent
+        command: [python, /app/proxy.py]
+        env:
+        - { name: EGRESS_HOSTS, value: api.osv.dev }
+        readinessProbe:
+          tcpSocket: { port: 8080 }
+          periodSeconds: 3
+        resources:
+          requests: { cpu: 25m, memory: 32Mi }
+          limits: { cpu: 250m, memory: 96Mi }
         securityContext:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true
-          capabilities: { drop: ["ALL"] }
+          capabilities: { drop: [ALL] }
 ---
 apiVersion: v1
 kind: Service
-metadata:
-  name: egress-proxy
-  namespace: scanner
+metadata: { name: osv-egress-proxy, namespace: scanner }
 spec:
-  selector: { app: egress-proxy }
+  selector: { app: osv-egress-proxy }
   ports: [{ port: 8080, targetPort: 8080 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: analyst-proxy-ingress, namespace: scanner }
+spec:
+  podSelector:
+    matchLabels: { app: egress-proxy }
+  policyTypes: [Ingress, Egress]
+  ingress:
+  - from:
+    - podSelector: { matchLabels: { app: cve-agent } }
+    ports: [{ protocol: TCP, port: 8443 }]
+  egress:
+  - to:
+    - podSelector: { matchLabels: { app: osv-egress-proxy } }
+    ports: [{ protocol: TCP, port: 8080 }]
+  - to:
+    - namespaceSelector:
+        matchLabels: { kubernetes.io/metadata.name: kube-system }
+      podSelector: { matchLabels: { k8s-app: kube-dns } }
+    ports: [{ protocol: UDP, port: 53 }, { protocol: TCP, port: 53 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: osv-proxy-ingress, namespace: scanner }
+spec:
+  podSelector:
+    matchLabels: { app: osv-egress-proxy }
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - podSelector: { matchLabels: { app: egress-proxy } }
+    ports: [{ protocol: TCP, port: 8080 }]

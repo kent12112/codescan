@@ -1,4 +1,5 @@
-"""Unpack a bounded data-only local source bundle, then run the scanner."""
+"""Scanner container entrypoint: confirm isolation, unpack a bounded data-only
+source bundle, then run pipeline.py. Invoked as `python -m codescan.entrypoint`."""
 import os
 import shutil
 import sys

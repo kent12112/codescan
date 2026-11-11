@@ -1,0 +1,14 @@
+# Gateway image: runs two different things depending on the k8s manifest.
+#   1. Default ENTRYPOINT (gunicorn service.gateway) -> llm-gateway (k8s/llm-gateway.yaml)
+#   2. `command: [python, /app/proxy.py]` overrides the ENTRYPOINT -> the allowlist
+#      CONNECT proxies: scanner-proxy (github.com), osv-egress-proxy (api.osv.dev),
+#      llm-egress-proxy (api.anthropic.com). Each sets its own EGRESS_HOSTS.
+FROM python:3.12-slim@sha256:4840d514c583a4d3d8cad3940e68dee6f0f6f3635c12fcd0a3d74c21a5b93a54
+COPY dependencies/gateway.lock /tmp/runtime.lock
+RUN pip install --no-cache-dir --require-hashes -r /tmp/runtime.lock && useradd --create-home --uid 1000 gateway
+COPY service /app/service
+COPY egress/proxy.py /app/proxy.py
+WORKDIR /app
+USER gateway
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/app
+ENTRYPOINT ["gunicorn", "-c", "service/gunicorn_config.py", "service.gateway:create_app()"]
